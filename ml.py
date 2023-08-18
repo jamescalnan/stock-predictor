@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, train_test_split
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+from keras.utils import Sequence
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import accuracy_score
-
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import track
@@ -19,86 +20,117 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("rich")
+c = Console()
 
-def compute_rsi(data, window=14):
-    """Compute the RSI (Relative Strength Index) of the data."""
-    delta = data.diff()
-    loss = delta.where(delta < 0, 0)
-    gain = -delta.where(delta > 0, 0)
-    
-    avg_gain = gain.rolling(window=window, min_periods=1).mean()
-    avg_loss = loss.rolling(window=window, min_periods=1).mean()
-    
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    
-    return rsi
+logger.info('Reading data...')
+# Load data
+data = pd.read_csv('TSLA.csv')
+data['Return'] = data['Close'].pct_change().fillna(0)
 
-logger.info("Loading the dataset...")
-data = pd.read_csv('AMZN.csv')
-data['Return'] = data['Close'].pct_change()
+logger.info('Calculating drift and volatility...')
+# Calculate drift and volatility for GBM
+drift = data['Return'].mean()
+volatility = data['Return'].std()
 
-logger.info("Creating lagged features...")
-lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
-for feature in lag_features:
-    for i in range(1, 6):
-        data[f'{feature}_Lag_{i}'] = data[feature].shift(i)
+def gbm_simulation(S0, drift, volatility, days=30, simulations=1000):
+    """Simulates stock prices using Geometric Brownian Motion."""
+    dt = 1  # time increment (1 day)
+    simulated_prices = np.zeros((days, simulations))
+    simulated_prices[0] = S0
+    for day in range(1, days):
+        dS = simulated_prices[day-1] * (drift * dt + volatility * np.random.normal(0, 1, simulations) * np.sqrt(dt))
+        simulated_prices[day] = simulated_prices[day-1] + dS
+    return simulated_prices
 
-logger.info("Calculating moving averages...")
-data['MA5'] = data['Close'].rolling(window=5).mean()
-data['MA30'] = data['Close'].rolling(window=30).mean()
+logger.info('Simulating paths...')
+# Simulate future paths using GBM
+forecast_days = 30
+all_simulated_paths = []
+for price in data['Close']:
+    simulated_paths = gbm_simulation(price, drift, volatility, days=forecast_days)
+    all_simulated_paths.extend(simulated_paths.T)
 
-logger.info("Calculating RSI...")
-data['RSI'] = compute_rsi(data['Close'])
+logger.info('Preparing data...')
+# Combine real data with simulated paths
+combined_data = np.concatenate([data['Close'].values, np.array(all_simulated_paths).flatten()])
 
-logger.info("Cleaning up dataset...")
-data = data.dropna()
+logger.info('Preparing sequences...')
+# Prepare sequences for LSTM
+sequence_length = 10
+X, y = [], []
+for i in track(range(len(combined_data) - sequence_length - 1), description=f'{" " * 32}', transient=False):
+    sequence = combined_data[i:i + sequence_length]
+    target = combined_data[i + sequence_length]
+    X.append(sequence)
+    y.append(1 if target > sequence[-1] else 0)
 
-data['Target'] = (data['Return'] > 0).astype(int)
+X = np.array(X)
+y = np.array(y)
 
-X = data.drop(columns=['Date', 'Return', 'Target'])
-y = data['Target']
+# Reshape X for LSTM [samples, time steps, features]
+with c.status('', spinner='line'):
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
 
-param_dist = {
-    'n_estimators': np.arange(50, 501, 50),
-    'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-    'max_depth': np.arange(3, 16, 1),
-    'min_samples_split': np.arange(2, 11, 1),
-    'min_samples_leaf': np.arange(1, 11, 1)
-}
+logger.info('Splitting data...')
+# Splitting data into train and test sets
+split = int(0.8 * len(X))
+X_train, X_test = X[:split], X[split:]
+y_train, y_test = y[:split], y[split:]
 
-clf = GradientBoostingClassifier()
+logger.info('Normalizing data...')
+# Normalize data
+scaler = MinMaxScaler(feature_range=(0, 1))
+X_train = scaler.fit_transform(X_train.reshape(-1, 1)).reshape(X_train.shape)
+X_test = scaler.transform(X_test.reshape(-1, 1)).reshape(X_test.shape)
 
-tscv = TimeSeriesSplit(n_splits=5)
+# Define TimeSeriesGenerator
+class TimeSeriesGenerator(Sequence):
+    def __init__(self, X_data, y_data, batch_size, shuffle=True):
+        self.X_data = X_data
+        self.y_data = y_data
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.indices = np.arange(len(self.X_data))
+        
+        if self.shuffle:
+            np.random.shuffle(self.indices)
 
-logger.info("Starting RandomizedSearchCV...")
-search = RandomizedSearchCV(
-    clf, 
-    param_distributions=param_dist, 
-    n_iter=5, 
-    scoring='accuracy', 
-    n_jobs=-1, 
-    cv=tscv, 
-    verbose=1, 
-    random_state=42
-)
+    def __len__(self):
+        return int(np.ceil(len(self.X_data) / self.batch_size))
 
-search.fit(X, y)
+    def __getitem__(self, index):
+        indices = self.indices[index * self.batch_size:(index + 1) * self.batch_size]
+        X = np.take(self.X_data, indices, axis=0)
+        y = np.take(self.y_data, indices, axis=0)
+        return X, y
 
-best_params = search.best_params_
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.indices)
 
-logger.info("Performing Time Series Cross-Validation with best parameters...")
-clf_best = GradientBoostingClassifier(**best_params)
-scores = []
-for train_index, test_index in track(tscv.split(X), description="Cross-Validation"):
-    X_train, X_test = X.iloc[train_index], X.iloc[test_index]
-    y_train, y_test = y.iloc[train_index], y.iloc[test_index]
-    
-    clf_best.fit(X_train, y_train)
-    y_pred = clf_best.predict(X_test)
-    scores.append(accuracy_score(y_test, y_pred))
+# Create data generators
+batch_size = 32
+train_generator = TimeSeriesGenerator(X_train, y_train, batch_size)
+test_generator = TimeSeriesGenerator(X_test, y_test, batch_size)
 
-avg_score = np.mean(scores)
+logger.info('Building model...')
+# Define LSTM model
+model = Sequential()
+model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], 1)))
+model.add(LSTM(units=50))
+model.add(Dense(units=1, activation='sigmoid'))
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
-logger.info(f"Best Parameters: {best_params}")
-logger.info(f"Average Accuracy: {avg_score:.2%}")
+logger.info('Training model...')
+# Train the model using data generators
+model.fit(train_generator, epochs=5, validation_data=test_generator)
+
+logger.info('Predicting...')
+# Predict on the test set
+y_pred = model.predict(X_test)
+y_pred = [1 if pred > 0.5 else 0 for pred in y_pred]
+
+logger.info('Evaluating...')
+# Evaluate accuracy
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Accuracy: {accuracy:.2%}")
