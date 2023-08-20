@@ -196,19 +196,27 @@ def GBC_Train(data, ticker):
         'min_samples_leaf': np.arange(1, 11, 1)
     }
 
+    best_params = {
+        'n_estimators': 250,
+        'min_samples_split': 6,
+        'min_samples_leaf': 4,
+        'max_depth': 3,
+        'learning_rate': 0.2
+    }
+
     # Create a base classifier
-    gbc = GradientBoostingClassifier()
+    # gbc = GradientBoostingClassifier()
 
     # Initialize GridSearchCV
-    grid_search = GridSearchCV(estimator=gbc, param_grid=param_grid, 
-                               scoring='accuracy', cv=3, n_jobs=-1, verbose=2)
+    # grid_search = GridSearchCV(estimator=gbc, param_grid=param_grid, 
+    #                            scoring='accuracy', cv=3, n_jobs=-1, verbose=2)
 
-    logger.info("Performing grid search...")
-    # with c.status('', spinner='line'):
-    grid_search.fit(X_train, y_train)
+    # logger.info("Performing grid search...")
+    # # with c.status('', spinner='line'):
+    # grid_search.fit(X_train, y_train)
 
     # Extract the best parameters from GridSearchCV
-    best_params = grid_search.best_params_
+    # best_params = grid_search.best_params_
     logger.info(f"Best parameters found: {best_params}")
 
     # Train the model with the best parameters
@@ -217,6 +225,9 @@ def GBC_Train(data, ticker):
 
     logger.info("Making predictions on the test set...")
     y_pred = clf.predict(X_test)
+    c.print(y_test)
+    input()
+    c.print(y_pred)
 
     logger.info("Calculating accuracy...")
     accuracy = accuracy_score(y_test, y_pred)
