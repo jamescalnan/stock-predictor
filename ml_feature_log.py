@@ -4,6 +4,9 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+import numpy as np
 
 import numpy as np
 import tensorflow as tf
@@ -70,6 +73,7 @@ def get_file_selection():
     # sys.stdout.write("\033[F")
     return csv_files[choice]
 
+
 def compute_macd(data, short_window=12, long_window=26, signal_window=9):
     """Compute the MACD (Moving Average Convergence Divergence) of the data."""
     short_ema = data['Close'].ewm(span=short_window, adjust=False).mean()
@@ -93,41 +97,9 @@ def compute_stochastic_oscillator(data, window=14):
     k = 100 * ((data['Close'] - low_min) / (high_max - low_min))
     return k
 
-def  fetch_news(stock_symbol, date):
-    url = f"https://newsapi.org/v2/everything?q={stock_symbol}&from={date}&to={date}&apiKey=ef2e0d24af4f471bbd9d1b34c01d1360"
-    response = requests.get(url)
-    news_data = response.json()
-    
-    # Check if the response contains the 'articles' key
-    if 'articles' in news_data:
-        if news_data['articles']:
-            return news_data['articles'][0]['title'] or news_data['articles'][0]['content']
-    else:
-        # Print out the response to debug any potential issues
-        print(f"Unexpected response from News API for {stock_symbol} on {date}: {news_data}")
-    return None
-
-# Analyze sentiment of the news article
-def analyze_sentiment(news_article):
-    analysis = TextBlob(news_article)
-    return (analysis.sentiment.polarity + 1) / 2  # Normalize score to [0,1]
-
-def get_sentiment(stock_symbol, date):
-    saved_score = sentiment_data[(sentiment_data['Date'] == date) & (sentiment_data['Ticker'] == stock_symbol)]['Score'].values
-
-    if saved_score:
-        return saved_score[0]
-
-    news_article = fetch_news(stock_symbol, date)
-    if news_article:
-        score = analyze_sentiment(news_article)
-        # Save the new sentiment score to the file
-        with open(SENTIMENT_FILE, 'a') as f:
-            f.write(f"{date},{stock_symbol},{score}\n")
-        return score
-    return None
 
 def GBC_Train(data, ticker):
+    data = data.copy()
     logger.info("Creating lagged features...")
     lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
     for feature in lag_features:
@@ -166,167 +138,139 @@ def GBC_Train(data, ticker):
                 data[f'{feature}_x_{other_feature}'] = data[feature] * data[other_feature]  # Interaction feature
 
     logger.info("Cleaning up dataset...")
-    data = data.copy()
     data = data.dropna()
-    data.loc[:, 'Target'] = (data['Return'] > 0).astype(int)
 
+    # Predict the next day's closing price (so we use a shift of -1)
+    data.loc[:, 'Next_Close'] = data['Close'].shift(-1)
 
-    
+    # Drop rows with NaN in 'Next_Close' column
+    data = data.dropna(subset=['Next_Close'])
 
-    X = data.drop(columns=['Date', 'Return', 'Target'])
-    y = data['Target']
+    X = data.drop(columns=['Date', 'Next_Close'])
+    y = data['Next_Close']
+
+    X = data.drop(columns=['Date', 'Next_Close'])
+    y = data['Next_Close']
 
     logger.info("Splitting data into training and testing sets...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Define the parameter grid
     # param_grid = {
-    #     'n_estimators': [100, 250, 450],
-    #     'min_samples_split': [2, 5, 10],
-    #     'min_samples_leaf': [1, 2, 4],
-    #     'max_depth': [3, 4, 5, 6],
-    #     'learning_rate': [0.01, 0.05, 0.1]
+    #     'n_estimators': np.arange(50, 501, 50),
+    #     'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
+    #     'max_depth': np.arange(3, 16, 1),
+    #     'min_samples_split': np.arange(2, 11, 1),
+    #     'min_samples_leaf': np.arange(1, 11, 1),
+    #     'subsample': [0.5, 0.75, 1]
     # }
-
-    param_grid = {
-        'n_estimators': np.arange(50, 501, 50),
-        'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-        'max_depth': np.arange(3, 16, 1),
-        'min_samples_split': np.arange(2, 11, 1),
-        'min_samples_leaf': np.arange(1, 11, 1)
-    }
 
     best_params = {
         'n_estimators': 250,
         'min_samples_split': 6,
         'min_samples_leaf': 4,
         'max_depth': 3,
-        'learning_rate': 0.2
+        'learning_rate': 0.2,
+        'subsample': 1
     }
 
-    # Create a base classifier
-    # gbc = GradientBoostingClassifier()
-
-    # Initialize GridSearchCV
-    # grid_search = GridSearchCV(estimator=gbc, param_grid=param_grid, 
-    #                            scoring='accuracy', cv=3, n_jobs=-1, verbose=2)
-
-    # logger.info("Performing grid search...")
-    # # with c.status('', spinner='line'):
-    # grid_search.fit(X_train, y_train)
-
-    # Extract the best parameters from GridSearchCV
-    # best_params = grid_search.best_params_
-    logger.info(f"Best parameters found: {best_params}")
-
     # Train the model with the best parameters
-    clf = GradientBoostingClassifier(**best_params)
-    clf.fit(X_train, y_train)
+    reg = GradientBoostingRegressor(**best_params)
+    reg.fit(X_train, y_train)
 
     logger.info("Making predictions on the test set...")
-    y_pred = clf.predict(X_test)
-    c.print(y_test)
-    input()
-    c.print(y_pred)
+    y_pred = reg.predict(X_test)
 
-    logger.info("Calculating accuracy...")
-    accuracy = accuracy_score(y_test, y_pred)
-    logger.info(f"Accuracy: {accuracy:.2%}")
+    logger.info("Calculating performance metrics...")
+    mse = mean_squared_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
 
-    return clf, accuracy
+    
+    logger.info(f"Mean Squared Error: {mse:.2f}")
+    logger.info(f"R^2 Score: {r2:.2%}")
+
+    return reg, mse, r2, data
 
 
-# Adding the LSTM_Train function
-def LSTM_Train(data, sequence_length=60):
+
+def predict_next_day_closing(data, model, given_date):
+    """
+    Predicts the next day's closing price for a given date.
+
+    Parameters:
+    - data: The dataset containing the historical stock data.
+    - model: The trained GradientBoostingRegressor model.
+    - given_date: The date for which we want to predict the next day's closing price.
+
+    Returns:
+    - Predicted closing price for the day after the given_date.
+    """
+    data.loc[:, 'Next_Close'] = data['Close'].shift(-1)
+    # Ensure the given_date exists in the dataset
+    if given_date not in data['Date'].values:
+        raise ValueError(f"Given date {given_date} not found in the dataset.")
+    
+    # Extract the features for the given_date
+    X_for_date = data[data['Date'] == given_date].drop(columns=['Date', 'Next_Close'])
+    
+    # Predict the closing price for the next day
+    predicted_close = model.predict(X_for_date)
+    
+    return predicted_close[0]
+
+def compare_predictions_with_actual(data, model):
+    """
+    Loops through all dates in the dataset and compares the predicted closing price 
+    with the actual closing price of the next day.
+
+    Parameters:
+    - data: The dataset containing the historical stock data.
+    - model: The trained GradientBoostingRegressor model.
+
+    Returns:
+    - A DataFrame containing the date, predicted closing price, and actual closing price.
+    """
+    data['Next_Close'] = data['Close'].shift(-1)
+    
+    results = []
+    
+    # Exclude the last date since we won't have the actual closing price for the day after the last date
+    dates_to_predict = data['Date'].iloc[:-1].values
+    misses = 0
+    for date in dates_to_predict:
+        # Extract the features for the current date
+        X_for_date = data[data['Date'] == date].drop(columns=['Date', 'Next_Close'])
+        
+        # Skip the prediction if the feature set contains NaN values
+        if X_for_date.isnull().values.any():
+            continue
+        
+        # Predict the closing price for the next day
+        predicted_close = model.predict(X_for_date)
+        
+        # Get the actual closing price for the next day
+        actual_close = data[data['Date'] == date]['Next_Close'].values[0]
+        
+        results.append({
+            'Date': date,
+            'Actual_Close': actual_close,
+            'Predicted_Close': predicted_close[0]
+        })
+
+        diff = predicted_close[0] - actual_close
+
+        if outside_1_percent(predicted_close[0], actual_close) :
+            logger.error(f"Date: {date}, Predicted: {predicted_close[0]:.2f}, Actual: {actual_close:.2f}, Difference: {diff:.2f}")
+            misses += 1
+        else:
+            logger.info(f"Date: {date}, Predicted: {predicted_close[0]:.2f}, Actual: {actual_close:.2f}, Difference: {diff:.2f}")
     
 
-    # Data scaling
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data['Close'].values.reshape(-1, 1))
+    logger.info(f"Misses: {misses}, Total: {len(results)}, Accuracy: {(len(results) - misses) / len(results):.2%}")
 
-    # Create sequences of data
-    def create_dataset(dataset, time_step=1):
-        dataX, dataY = [], []
-        for i in range(len(dataset) - time_step - 1):
-            a = dataset[i:(i + time_step), 0]
-            dataX.append(a)
-            dataY.append(dataset[i + time_step, 0])
-        return np.array(dataX), np.array(dataY)
+    return results
 
-    X, y = create_dataset(scaled_data, sequence_length)
-
-    # Split data into training and testing sets (80-20 split)
-    train_size = int(len(X) * 0.8)
-    X_train, X_test = X[0:train_size], X[train_size:]
-    y_train, y_test = y[0:train_size], y[train_size:]
-
-    # Reshape data to be [samples, time steps, features] which is required for LSTM
-    X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-    X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
-
-    # LSTM model architecture
-    model = Sequential()
-    model.add(LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)))
-    model.add(LSTM(50, return_sequences=False))
-    model.add(Dense(25))
-    model.add(Dense(1))
-
-    model.compile(optimizer='adam', loss='mean_squared_error')
-
-    # Train the model
-    model.fit(X_train, y_train, batch_size=1, epochs=1, validation_data=(X_test, y_test))
-
-    # Predictions
-    train_predict = model.predict(X_train)
-    test_predict = model.predict(X_test)
-
-    # Transform back to original scale
-    train_predict = scaler.inverse_transform(train_predict)
-    test_predict = scaler.inverse_transform(test_predict)
-
-    return model  # Return the trained LSTM model
-
-
-def backtest_LSTM(data, lstm_model, sequence_length=60):
-    from sklearn.preprocessing import MinMaxScaler
-    from sklearn.metrics import accuracy_score
-
-    # Data scaling
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data['Close'].values.reshape(-1, 1))
-
-    # Create sequences of data
-    def create_dataset(dataset, time_step=1):
-        dataX, dataY = [], []
-        for i in range(len(dataset) - time_step - 1):
-            a = dataset[i:(i + time_step), 0]
-            dataX.append(a)
-            dataY.append(dataset[i + time_step, 0])
-        return np.array(dataX), np.array(dataY)
-
-    X, y = create_dataset(scaled_data, sequence_length)
-
-    # Reshape data to be [samples, time steps, features] which is required for LSTM
-    X = X.reshape(X.shape[0], X.shape[1], 1)
-
-    # Predictions
-    y_pred_scaled = lstm_model.predict(X)
-    y_pred = scaler.inverse_transform(y_pred_scaled)
-
-    # Calculate returns
-    actual_returns = data['Close'].iloc[sequence_length + 1:].pct_change().dropna()
-    predicted_returns = pd.Series(y_pred.flatten()).pct_change().dropna()
-
-    # Convert returns to binary (1 for increase, 0 for decrease or no change)
-    y_actual_binary = (actual_returns > 0).astype(int).values
-    y_pred_binary = (predicted_returns > 0).astype(int).values
-
-    # Accuracy
-    accuracy = accuracy_score(y_actual_binary, y_pred_binary)
-
-    return accuracy
-
-
+def outside_1_percent(predicted, actual):
+    return abs(predicted - actual) >= (actual * 0.01)
 
 # Refactoring the main function
 def main():
@@ -334,22 +278,23 @@ def main():
     if not file_name:
         return
 
-    os.system('cls' if os.name == 'nt' else 'clear')
+    # os.system('cls' if os.name == 'nt' else 'clear')
 
     logger.info(f"Loading the dataset {file_name}...")
     data = pd.read_csv(file_name)
     data['Return'] = data['Close'].pct_change()
+
+    diff_data = pd.read_csv('MSFT_1Y.csv')
+    diff_data['Return'] = diff_data['Close'].pct_change()
     
     # sequence_length = 20
 
-    gbc_clf, gbc_accuracy = GBC_Train(data, file_name.split('.')[0])
-    # lstm_model = LSTM_Train(data, sequence_length)  # Train the LSTM model
+    gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
 
-    # logger.info("Backtesting the LSTM model...")
-    # lstm_accuracy = backtest_LSTM(data, lstm_model, sequence_length)
 
-    # logger.info(f"Gradient Boosting Classifier Accuracy: {gbc_accuracy:.2%}")
-    # logger.info(f"LSTM Accuracy: {lstm_accuracy:.2%}")
+    results = compare_predictions_with_actual(modified_data, gbc_clf)
+
+
 
 if __name__ == "__main__":
     try:
