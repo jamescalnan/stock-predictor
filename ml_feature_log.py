@@ -98,71 +98,72 @@ def compute_stochastic_oscillator(data, window=14):
     return k
 
 
-def GBC_Train(data, ticker):
-    data = data.copy()
-    logger.info("Creating lagged features...")
-    lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
-    for feature in lag_features:
-        for i in range(1, 6):  # Creating 5 lagged values
-            data[f'{feature}_Lag_{i}'] = data[feature].shift(i)
+def GBC_Train(datas, tickers):
+    # List to hold preprocessed dataframes
+    preprocessed_data_list = []
+    
+    for data, ticker in zip(datas, tickers):
+        data = data.copy()
+        logger.info(f"Processing data for ticker: {ticker}")
+        
+        # Preprocess and feature engineering for this data
+        logger.info("Creating lagged features...")
+        lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+        for feature in lag_features:
+            for i in range(1, 6):  # Creating 5 lagged values
+                data[f'{feature}_Lag_{i}'] = data[feature].shift(i)
 
-    logger.info("Calculating moving averages...")
-    data['MA5'] = data['Close'].rolling(window=5).mean()
-    data['MA30'] = data['Close'].rolling(window=30).mean()
-    data['MA7'] = data['Close'].rolling(window=7).mean()  # 7-day MA
+        logger.info("Calculating moving averages...")
+        data['MA5'] = data['Close'].rolling(window=5).mean()
+        data['MA30'] = data['Close'].rolling(window=30).mean()
+        data['MA7'] = data['Close'].rolling(window=7).mean()  # 7-day MA
 
-    logger.info("Calculating RSI...")
-    data['RSI'] = compute_rsi(data['Close'])
+        logger.info("Calculating RSI...")
+        data['RSI'] = compute_rsi(data['Close'])
 
-    # Create lagged features for RSI
-    for i in range(1, 6): 
-        data[f'RSI_Lag_{i}'] = data['RSI'].shift(i)
+        # Create lagged features for RSI
+        for i in range(1, 6): 
+            data[f'RSI_Lag_{i}'] = data['RSI'].shift(i)
 
-    logger.info("Calculating MACD and Signal Line...")
-    data['MACD'], data['Signal_Line'] = compute_macd(data)
+        logger.info("Calculating MACD and Signal Line...")
+        data['MACD'], data['Signal_Line'] = compute_macd(data)
 
-    logger.info("Calculating Bollinger Bands...")
-    data['Upper_Band'], data['Lower_Band'] = compute_bollinger_bands(data)
+        logger.info("Calculating Bollinger Bands...")
+        data['Upper_Band'], data['Lower_Band'] = compute_bollinger_bands(data)
 
-    logger.info("Calculating Stochastic Oscillator...")
-    data['Stochastic_Oscillator'] = compute_stochastic_oscillator(data)
+        logger.info("Calculating Stochastic Oscillator...")
+        data['Stochastic_Oscillator'] = compute_stochastic_oscillator(data)
 
-    # data['News_Sentiment'] = [get_sentiment(ticker, date) for date in data['Date']]
+        # Commented out as it seems to not be used currently
+        # data['News_Sentiment'] = [get_sentiment(ticker, date) for date in data['Date']]
 
-    logger.info("Generating interaction and polynomial features...")
-    selected_features = ['Open', 'High', 'Low', 'Close']
-    for feature in selected_features:
-        data[f'{feature}_Squared'] = data[feature] ** 2  # Polynomial feature
-        for other_feature in selected_features:
-            if feature != other_feature:
-                data[f'{feature}_x_{other_feature}'] = data[feature] * data[other_feature]  # Interaction feature
+        logger.info("Generating interaction and polynomial features...")
+        selected_features = ['Open', 'High', 'Low', 'Close']
+        for feature in selected_features:
+            data[f'{feature}_Squared'] = data[feature] ** 2  # Polynomial feature
+            for other_feature in selected_features:
+                if feature != other_feature:
+                    data[f'{feature}_x_{other_feature}'] = data[feature] * data[other_feature]  # Interaction feature
 
-    logger.info("Cleaning up dataset...")
-    data = data.dropna()
+        logger.info("Cleaning up dataset...")
+        
+        # Predict the next day's closing price (so we use a shift of -1)
+        data.loc[:, 'Next_Close'] = data['Close'].shift(-1)
 
-    # Predict the next day's closing price (so we use a shift of -1)
-    data.loc[:, 'Next_Close'] = data['Close'].shift(-1)
+        # Drop rows with NaN in 'Next_Close' column
+        data = data.dropna(subset=['Next_Close'])
 
-    # Drop rows with NaN in 'Next_Close' column
-    data = data.dropna(subset=['Next_Close'])
+        # Append the preprocessed data to the list
+        preprocessed_data_list.append(data)
 
-    X = data.drop(columns=['Date', 'Next_Close'])
-    y = data['Next_Close']
+    # Concatenate all preprocessed dataframes
+    combined_data = pd.concat(preprocessed_data_list, axis=0)
 
-    X = data.drop(columns=['Date', 'Next_Close'])
-    y = data['Next_Close']
+    X = combined_data.drop(columns=['Date', 'Next_Close'])
+    y = combined_data['Next_Close']
 
     logger.info("Splitting data into training and testing sets...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # param_grid = {
-    #     'n_estimators': np.arange(50, 501, 50),
-    #     'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-    #     'max_depth': np.arange(3, 16, 1),
-    #     'min_samples_split': np.arange(2, 11, 1),
-    #     'min_samples_leaf': np.arange(1, 11, 1),
-    #     'subsample': [0.5, 0.75, 1]
-    # }
 
     best_params = {
         'n_estimators': 250,
@@ -184,11 +185,10 @@ def GBC_Train(data, ticker):
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
 
-    
     logger.info(f"Mean Squared Error: {mse:.2f}")
     logger.info(f"R^2 Score: {r2:.2%}")
 
-    return reg, mse, r2, data
+    return reg, mse, r2, combined_data
 
 
 
@@ -272,25 +272,30 @@ def compare_predictions_with_actual(data, model):
 def outside_1_percent(predicted, actual):
     return abs(predicted - actual) >= (actual * 0.01)
 
-# Refactoring the main function
-def main():
-    file_name = get_file_selection()
-    if not file_name:
-        return
-
-    # os.system('cls' if os.name == 'nt' else 'clear')
-
+def open_data_file(file_name):
     logger.info(f"Loading the dataset {file_name}...")
     data = pd.read_csv(file_name)
     data['Return'] = data['Close'].pct_change()
 
+    return data
+
+# Refactoring the main function
+def main():
+    # file_name = get_file_selection()
+    # if not file_name:
+    #     return
+
+    # os.system('cls' if os.name == 'nt' else 'clear')
+
+    msft_data = open_data_file('MSFT_1Y.csv')
+    aapl_data = open_data_file('AAPL_1Y.csv')
+    baba_data = open_data_file('BABA_1Y.csv')
+
+
     diff_data = pd.read_csv('MSFT_1Y.csv')
     diff_data['Return'] = diff_data['Close'].pct_change()
     
-    # sequence_length = 20
-
-    gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
-
+    gbc_clf, mse, r2, modified_data = GBC_Train([msft_data, aapl_data, baba_data], ['MSFT', 'AAPL', 'BABA'])
 
     results = compare_predictions_with_actual(modified_data, gbc_clf)
 
