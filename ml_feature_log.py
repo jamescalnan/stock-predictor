@@ -98,6 +98,50 @@ def compute_stochastic_oscillator(data, window=14):
     return k
 
 
+def apply_feature_engineering(data):
+    data = data.copy()
+    lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+    for feature in lag_features:
+        for i in range(1, 6):  # Creating 5 lagged values
+            data[f'{feature}_Lag_{i}'] = data[feature].shift(i)
+
+    logger.info("Calculating moving averages...")
+    data['MA5'] = data['Close'].rolling(window=5).mean()
+    data['MA30'] = data['Close'].rolling(window=30).mean()
+    data['MA7'] = data['Close'].rolling(window=7).mean()  # 7-day MA
+
+    logger.info("Calculating RSI...")
+    data['RSI'] = compute_rsi(data['Close'])
+
+    # Create lagged features for RSI
+    for i in range(1, 6): 
+        data[f'RSI_Lag_{i}'] = data['RSI'].shift(i)
+
+    logger.info("Calculating MACD and Signal Line...")
+    data['MACD'], data['Signal_Line'] = compute_macd(data)
+
+    logger.info("Calculating Bollinger Bands...")
+    data['Upper_Band'], data['Lower_Band'] = compute_bollinger_bands(data)
+
+    logger.info("Calculating Stochastic Oscillator...")
+    data['Stochastic_Oscillator'] = compute_stochastic_oscillator(data)
+
+    # data['News_Sentiment'] = [get_sentiment(ticker, date) for date in data['Date']]
+
+    logger.info("Generating interaction and polynomial features...")
+    selected_features = ['Open', 'High', 'Low', 'Close']
+    for feature in selected_features:
+        data[f'{feature}_Squared'] = data[feature] ** 2  # Polynomial feature
+        for other_feature in selected_features:
+            if feature != other_feature:
+                data[f'{feature}_x_{other_feature}'] = data[feature] * data[other_feature]  # Interaction feature
+
+    logger.info("Cleaning up dataset...")
+    data = data.dropna()
+
+    return data
+
+
 def GBC_Train(data, ticker):
     data = data.copy()
     logger.info("Creating lagged features...")
@@ -145,9 +189,6 @@ def GBC_Train(data, ticker):
 
     # Drop rows with NaN in 'Next_Close' column
     data = data.dropna(subset=['Next_Close'])
-
-    X = data.drop(columns=['Date', 'Next_Close'])
-    y = data['Next_Close']
 
     X = data.drop(columns=['Date', 'Next_Close'])
     y = data['Next_Close']
@@ -212,6 +253,11 @@ def predict_next_day_closing(data, model, given_date):
     # Extract the features for the given_date
     X_for_date = data[data['Date'] == given_date].drop(columns=['Date', 'Next_Close'])
     
+    # Save the X_for_date DataFrame to a CSV file
+    X_for_date.to_csv('X_for_date.csv', index=False)
+
+    c.print(X_for_date)
+
     # Predict the closing price for the next day
     predicted_close = model.predict(X_for_date)
     
@@ -230,9 +276,9 @@ def compare_predictions_with_actual(data, model):
     - A DataFrame containing the date, predicted closing price, and actual closing price.
     """
     data['Next_Close'] = data['Close'].shift(-1)
-    
+
     results = []
-    
+
     # Exclude the last date since we won't have the actual closing price for the day after the last date
     dates_to_predict = data['Date'].iloc[:-1].values
     misses = 0
@@ -258,7 +304,7 @@ def compare_predictions_with_actual(data, model):
 
         diff = predicted_close[0] - actual_close
 
-        if outside_1_percent(predicted_close[0], actual_close) :
+        if outside_1_percent(predicted_close[0], actual_close, 0.01) :
             logger.error(f"Date: {date}, Predicted: {predicted_close[0]:.2f}, Actual: {actual_close:.2f}, Difference: {diff:.2f}")
             misses += 1
         else:
@@ -269,8 +315,8 @@ def compare_predictions_with_actual(data, model):
 
     return results
 
-def outside_1_percent(predicted, actual):
-    return abs(predicted - actual) >= (actual * 0.01)
+def outside_1_percent(predicted, actual, pct=0.01):
+    return abs(predicted - actual) >= (actual * pct)
 
 # Refactoring the main function
 def main():
@@ -286,13 +332,31 @@ def main():
 
     diff_data = pd.read_csv('MSFT_1Y.csv')
     diff_data['Return'] = diff_data['Close'].pct_change()
-    
+
     # sequence_length = 20
 
     gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
 
 
-    results = compare_predictions_with_actual(modified_data, gbc_clf)
+    # results = compare_predictions_with_actual(modified_data, gbc_clf)
+
+
+    date = '2023-08-18'
+
+    # Apply feature engineering
+    with_features = apply_feature_engineering(data)
+
+    X_for_date = with_features[with_features['Date'] == date].drop(columns=['Date'])
+
+    predicted_close = gbc_clf.predict(X_for_date)
+
+    # Increment the date by 1 day
+    date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
+    # If the date is a weekend, increment it by 1 day until it's a weekday
+    while pd.to_datetime(date).weekday() >= 5:
+        date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
+
+    logger.info(f"Predicted closing price for {date}: {predicted_close[0]:.2f}")
 
 
 
