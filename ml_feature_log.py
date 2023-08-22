@@ -282,6 +282,8 @@ def compare_predictions_with_actual(data, model):
     # Exclude the last date since we won't have the actual closing price for the day after the last date
     dates_to_predict = data['Date'].iloc[:-1].values
     misses = 0
+    accuracy_requirement = 0.001
+    prev = None
     for date in dates_to_predict:
         # Extract the features for the current date
         X_for_date = data[data['Date'] == date].drop(columns=['Date', 'Next_Close'])
@@ -304,14 +306,23 @@ def compare_predictions_with_actual(data, model):
 
         diff = predicted_close[0] - actual_close
 
-        if outside_1_percent(predicted_close[0], actual_close, 0.01) :
-            logger.error(f"Date: {date}, Predicted: {predicted_close[0]:.2f}, Actual: {actual_close:.2f}, Difference: {diff:.2f}")
+        # Compare theactual close and the predicted close, and if the predicted value predicts a price increase or decrease that is correct then print this
+        if prev is not None:
+            if (predicted_close[0] > prev and actual_close > prev) or (predicted_close[0] < prev and actual_close < prev):
+                logger.info(f"Date: {date}, Correctly predicted a {'rise' if actual_close > prev else 'fall'} from previous close")
+            else:
+                logger.error(f"Date: {date}, Failed to predict a {'rise' if actual_close > prev else 'fall'} from previous close")
+
+
+        if outside_1_percent(predicted_close[0], actual_close, accuracy_requirement) :
+            logger.error(f"Date: {date}, Actual: ${actual_close:.2f}, Predicted: ${predicted_close[0]:.2f}, Difference: ${diff:.2f}")
             misses += 1
         else:
-            logger.info(f"Date: {date}, Predicted: {predicted_close[0]:.2f}, Actual: {actual_close:.2f}, Difference: {diff:.2f}")
-    
+            logger.info(f"Date: {date}, Actual: ${actual_close:.2f}, Predicted: ${predicted_close[0]:.2f}, Difference: ${diff:.2f}")
+        c.print()
+        prev = actual_close
 
-    logger.info(f"Misses: {misses}, Total: {len(results)}, Accuracy: {(len(results) - misses) / len(results):.2%}")
+    logger.info(f"Misses: {misses}, Total: {len(results)}, Accuracy: {(len(results) - misses) / len(results):.2%}, Accuracy Requirement: {accuracy_requirement*100}%")
 
     return results
 
@@ -338,8 +349,8 @@ def main():
     gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
 
 
-    # results = compare_predictions_with_actual(modified_data, gbc_clf)
-
+    results = compare_predictions_with_actual(modified_data, gbc_clf)
+    c.print('\n\n')
 
     date = '2023-08-18'
 
@@ -356,7 +367,15 @@ def main():
     while pd.to_datetime(date).weekday() >= 5:
         date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
 
-    logger.info(f"Predicted closing price for {date}: {predicted_close[0]:.2f}")
+    actual = 175.84
+
+    logger.info(f"Predicted closing price for {date}: {predicted_close[0]:.2f}, actual closing price: {actual}")
+
+    # Show the r2 and mse
+    logger.info(f"Mean Squared Error: {mse:.2f}")
+    logger.info(f"R^2 Score: {r2:.2%}")
+    # display the ticker
+    logger.info(f"File: {file_name.split('.')[0]}")
 
 
 
