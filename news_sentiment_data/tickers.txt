@@ -1,0 +1,9 @@
+$AAPL
+$GOOGL
+$MSFT
+$NVDA
+$BABA
+$NVDA
+$AMZN
+$FB
+$TSLA
