@@ -24,8 +24,8 @@ c = Console()
 
 def get_news(ticker):
     API_ENDPOINT = "https://newsapi.org/v2/everything"
-    API_KEY = "ef2e0d24af4f471bbd9d1b34c01d1360"  # You'll need to replace this with your actual API key
-    query = ticker  # or any other refinement you want to the query
+    API_KEY = "ef2e0d24af4f471bbd9d1b34c01d1360"  
+    query = ticker 
     
     params = {
         'q': query,
@@ -144,8 +144,6 @@ def extract_content_from_url(url):
     response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
-    # This is a generic approach, you might need to adjust based on the structure of the website.
-    # For example, the content might be within an <article> tag or a specific class.
     paragraphs = soup.find_all('p')
     content = ' '.join([p.text for p in paragraphs])
 
