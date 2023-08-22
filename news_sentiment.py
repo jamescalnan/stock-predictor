@@ -119,6 +119,7 @@ def execute(ticker):
     logger.info('Saving data...')
     return save_to_csv(data_to_save, ticker)
 
+
 def main():
     # Rerun the execute function on the tickers in /news_sentiment_data/tickers.txt
     with open('news_sentiment_data/tickers.txt', 'r') as f:
