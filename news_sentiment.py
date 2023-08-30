@@ -20,11 +20,13 @@ logging.basicConfig(
 logger = logging.getLogger("rich")
 import requests
 
+from API_KEYS import NEWS_API_KEY
+
 c = Console()
 
 def get_news(ticker):
     API_ENDPOINT = "https://newsapi.org/v2/everything"
-    API_KEY = "ef2e0d24af4f471bbd9d1b34c01d1360"  
+    API_KEY = NEWS_API_KEY
     query = ticker 
     
     params = {
