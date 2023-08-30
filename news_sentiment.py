@@ -95,14 +95,14 @@ def save_to_csv(data, ticker):
 
 
 
-def execute(ticker):
+def execute(ticker, i, total):
     news_articles = get_news(ticker)
     
     data_to_save = []
 
     
     for article in news_articles:
-        logger.info(f'Processing article: {article["title"]}')
+        logger.info(f'({i}/{total}) Processing article: {article["title"]}')
         url = article['url']
         title = article['title']
         
@@ -127,8 +127,8 @@ def main():
 
     data = []
 
-    for ticker in tickers:
-        data.append(execute(ticker))
+    for i, ticker in enumerate(tickers):
+        data.append(execute(ticker, i, len(tickers)))
     
 
     logger.info('Done.')

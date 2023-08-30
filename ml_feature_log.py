@@ -98,7 +98,7 @@ def compute_stochastic_oscillator(data, window=14):
     return k
 
 
-def apply_feature_engineering(data):
+def apply_feature_engineering(data, ticker):
     data = data.copy()
     lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
     for feature in lag_features:
@@ -127,6 +127,47 @@ def apply_feature_engineering(data):
     data['Stochastic_Oscillator'] = compute_stochastic_oscillator(data)
 
     # data['News_Sentiment'] = [get_sentiment(ticker, date) for date in data['Date']]
+
+    # News Sentiment
+    if '_' in ticker:
+        ticker = ticker.split('_')[0]
+
+    news_sentiment = pd.read_csv(f'news_sentiment_data/{ticker}_news_data.csv')
+
+    # Assign column names to the data in the form date, $ticker, sentiment_score, url, title
+    news_sentiment.columns = ['Date', 'Ticker', 'Score', 'URL', 'Title']
+
+    # Index the data by date
+    news_sentiment = news_sentiment.set_index('Date')
+
+    # Need to add these sentiment scores to the data, need to loop through the sentiment data 
+    # and if there is a score for that date then add it to the data
+    # Loop through the data and check if the date is in the sentiment data
+    # If it is then add the score to the data
+    # If not then add a 0
+
+    # Create a new column in the data called sentiment score
+    data['Sentiment_Score'] = 0
+
+    # Loop through the data
+    for index, row in data.iterrows():
+        date = row['Date']
+        
+        # Check if the index is in the sentiment data
+        if date in news_sentiment.index:
+            # If it is then add the score to the data
+            # Need to check if there is more than one score for that date, if there is then take the average
+            # Get the scores for that date
+            scores = news_sentiment.loc[date]['Score']
+            # Check if there is more than one score
+            if not type(scores) == np.float64 and len(scores) > 1:
+                # If there is then take the average
+                data.at[index, 'Sentiment_Score'] = np.mean(scores)
+            else:
+                data.at[index, 'Sentiment_Score'] = news_sentiment.at[date, 'Score']
+        # If not then add a 0
+        else:
+            data.at[index, 'Sentiment_Score'] = 0
 
     logger.info("Generating interaction and polynomial features...")
     selected_features = ['Open', 'High', 'Low', 'Close']
@@ -171,7 +212,47 @@ def GBC_Train(data, ticker):
     logger.info("Calculating Stochastic Oscillator...")
     data['Stochastic_Oscillator'] = compute_stochastic_oscillator(data)
 
-    # data['News_Sentiment'] = [get_sentiment(ticker, date) for date in data['Date']]
+    # News Sentiment
+    if '_' in ticker:
+        ticker = ticker.split('_')[0]
+
+    news_sentiment = pd.read_csv(f'news_sentiment_data/{ticker}_news_data.csv')
+
+    # Assign column names to the data in the form date, $ticker, sentiment_score, url, title
+    news_sentiment.columns = ['Date', 'Ticker', 'Score', 'URL', 'Title']
+
+    # Index the data by date
+    news_sentiment = news_sentiment.set_index('Date')
+
+    # Need to add these sentiment scores to the data, need to loop through the sentiment data 
+    # and if there is a score for that date then add it to the data
+    # Loop through the data and check if the date is in the sentiment data
+    # If it is then add the score to the data
+    # If not then add a 0
+
+    # Create a new column in the data called sentiment score
+    data['Sentiment_Score'] = 0
+
+    # Loop through the data
+    for index, row in data.iterrows():
+        date = row['Date']
+        
+        # Check if the index is in the sentiment data
+        if date in news_sentiment.index:
+            # If it is then add the score to the data
+            # Need to check if there is more than one score for that date, if there is then take the average
+            # Get the scores for that date
+            scores = news_sentiment.loc[date]['Score']
+            # Check if there is more than one score
+            if not type(scores) == np.float64 and len(scores) > 1:
+                # If there is then take the average
+                data.at[index, 'Sentiment_Score'] = np.mean(scores)
+            else:
+                data.at[index, 'Sentiment_Score'] = news_sentiment.at[date, 'Score']
+        # If not then add a 0
+        else:
+            data.at[index, 'Sentiment_Score'] = 0
+
 
     logger.info("Generating interaction and polynomial features...")
     selected_features = ['Open', 'High', 'Low', 'Close']
@@ -196,6 +277,7 @@ def GBC_Train(data, ticker):
     logger.info("Splitting data into training and testing sets...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+    
     # param_grid = {
     #     'n_estimators': np.arange(50, 501, 50),
     #     'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
@@ -204,6 +286,26 @@ def GBC_Train(data, ticker):
     #     'min_samples_leaf': np.arange(1, 11, 1),
     #     'subsample': [0.5, 0.75, 1]
     # }
+
+    # clf = GradientBoostingClassifier()
+
+    # tscv = TimeSeriesSplit(n_splits=5)
+
+    # logger.info("Starting RandomizedSearchCV...")
+    # search = RandomizedSearchCV(
+    #     clf, 
+    #     param_distributions=param_dist, 
+    #     n_iter=5, 
+    #     scoring='accuracy', 
+    #     n_jobs=-1, 
+    #     cv=tscv, 
+    #     verbose=1, 
+    #     random_state=42
+    # )
+
+    # search.fit(X, y)
+
+    # best_params = search.best_params_
 
     best_params = {
         'n_estimators': 250,
@@ -256,7 +358,6 @@ def predict_next_day_closing(data, model, given_date):
     # Save the X_for_date DataFrame to a CSV file
     X_for_date.to_csv('X_for_date.csv', index=False)
 
-    c.print(X_for_date)
 
     # Predict the closing price for the next day
     predicted_close = model.predict(X_for_date)
@@ -341,10 +442,6 @@ def main():
     data = pd.read_csv(file_name)
     data['Return'] = data['Close'].pct_change()
 
-    diff_data = pd.read_csv('MSFT_1Y.csv')
-    diff_data['Return'] = diff_data['Close'].pct_change()
-
-    # sequence_length = 20
 
     gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
 
@@ -355,7 +452,7 @@ def main():
     date = '2023-08-18'
 
     # Apply feature engineering
-    with_features = apply_feature_engineering(data)
+    with_features = apply_feature_engineering(data, file_name.split('.')[0])
 
     X_for_date = with_features[with_features['Date'] == date].drop(columns=['Date'])
 
