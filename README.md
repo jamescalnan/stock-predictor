@@ -15,7 +15,7 @@ The Stock Predictor project aims to predict stock prices using machine learning 
 
 ## File Structure
 
-\```
+```
 stock-predictor/
 |-- .vscode/
 |   |-- settings.json
@@ -30,7 +30,7 @@ stock-predictor/
 |-- ml_feature_log.py   <- Main running script
 |-- news_sentiment.py
 |-- README.md
-\```
+```
 
 ## Setup and Installation
 
