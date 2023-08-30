@@ -7,12 +7,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
+import json
 
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from sklearn.preprocessing import MinMaxScaler
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -36,15 +33,7 @@ import requests
 from textblob import TextBlob
 
 c = Console()
-SENTIMENT_FILE = "sentiment_scores.csv"
 
-# Check if sentiment file exists, if not create it
-if not os.path.exists(SENTIMENT_FILE):
-    with open(SENTIMENT_FILE, 'w') as f:
-        f.write("Date,Ticker,Score\n")
-
-# Load existing sentiment scores
-sentiment_data = pd.read_csv(SENTIMENT_FILE)
 
 def compute_rsi(data, window=14):
     """Compute the RSI (Relative Strength Index) of the data."""
@@ -187,7 +176,7 @@ def apply_feature_engineering(data, ticker):
     return data
 
 
-def GBC_Train(data, ticker):
+def GBC_Train(data, ticker, best_params):
     data = data.copy()
     logger.info("Creating lagged features...")
     lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
@@ -311,14 +300,14 @@ def GBC_Train(data, ticker):
 
     # best_params = search.best_params_
 
-    best_params = {
-        'n_estimators': 250,
-        'min_samples_split': 6,
-        'min_samples_leaf': 4,
-        'max_depth': 3,
-        'learning_rate': 0.2,
-        'subsample': 1
-    }
+    # best_params = {
+    #     'n_estimators': 250,
+    #     'min_samples_split': 6,
+    #     'min_samples_leaf': 4,
+    #     'max_depth': 3,
+    #     'learning_rate': 0.2,
+    #     'subsample': 1
+    # }
 
     # Train the model with the best parameters
     reg = GradientBoostingRegressor(**best_params)
@@ -337,7 +326,166 @@ def GBC_Train(data, ticker):
 
     return reg, mse, r2, data
 
+def save_best_params(best_params, ticker):
+    # Create a dictionary to hold the best parameters
+    best_params_dict = best_params
 
+    # Convert the dictionary to a JSON string
+    best_params_json = json.dumps(best_params_dict, indent=4)
+
+    # Define the file name based on the ticker
+    file_name = f"gbr_best_params/{ticker}_best_params.json"
+
+    # Write the JSON string to a file
+    with open(file_name, "w") as f:
+        f.write(best_params_json)
+
+    logger.info(f"Best parameters for {ticker} saved to {file_name}.")
+
+def GBC_Best_Parameters(data, ticker):
+    data = data.copy()
+    logger.info("Creating lagged features...")
+    lag_features = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+    for feature in lag_features:
+        for i in range(1, 6):  # Creating 5 lagged values
+            data[f'{feature}_Lag_{i}'] = data[feature].shift(i)
+
+    logger.info("Calculating moving averages...")
+    data['MA5'] = data['Close'].rolling(window=5).mean()
+    data['MA30'] = data['Close'].rolling(window=30).mean()
+    data['MA7'] = data['Close'].rolling(window=7).mean()  # 7-day MA
+
+    logger.info("Calculating RSI...")
+    data['RSI'] = compute_rsi(data['Close'])
+
+    # Create lagged features for RSI
+    for i in range(1, 6): 
+        data[f'RSI_Lag_{i}'] = data['RSI'].shift(i)
+
+    logger.info("Calculating MACD and Signal Line...")
+    data['MACD'], data['Signal_Line'] = compute_macd(data)
+
+    logger.info("Calculating Bollinger Bands...")
+    data['Upper_Band'], data['Lower_Band'] = compute_bollinger_bands(data)
+
+    logger.info("Calculating Stochastic Oscillator...")
+    data['Stochastic_Oscillator'] = compute_stochastic_oscillator(data)
+
+    # News Sentiment
+    if '_' in ticker:
+        ticker = ticker.split('_')[0]
+
+    news_sentiment = pd.read_csv(f'news_sentiment_data/{ticker}_news_data.csv')
+
+    # Assign column names to the data in the form date, $ticker, sentiment_score, url, title
+    news_sentiment.columns = ['Date', 'Ticker', 'Score', 'URL', 'Title']
+
+    # Index the data by date
+    news_sentiment = news_sentiment.set_index('Date')
+
+    # Need to add these sentiment scores to the data, need to loop through the sentiment data 
+    # and if there is a score for that date then add it to the data
+    # Loop through the data and check if the date is in the sentiment data
+    # If it is then add the score to the data
+    # If not then add a 0
+
+    # Create a new column in the data called sentiment score
+    data['Sentiment_Score'] = 0
+
+    # Loop through the data
+    for index, row in data.iterrows():
+        date = row['Date']
+        
+        # Check if the index is in the sentiment data
+        if date in news_sentiment.index:
+            # If it is then add the score to the data
+            # Need to check if there is more than one score for that date, if there is then take the average
+            # Get the scores for that date
+            scores = news_sentiment.loc[date]['Score']
+            # Check if there is more than one score
+            if not type(scores) == np.float64 and len(scores) > 1:
+                # If there is then take the average
+                data.at[index, 'Sentiment_Score'] = np.mean(scores)
+            else:
+                data.at[index, 'Sentiment_Score'] = news_sentiment.at[date, 'Score']
+        # If not then add a 0
+        else:
+            data.at[index, 'Sentiment_Score'] = 0
+
+
+    logger.info("Generating interaction and polynomial features...")
+    selected_features = ['Open', 'High', 'Low', 'Close']
+    for feature in selected_features:
+        data[f'{feature}_Squared'] = data[feature] ** 2  # Polynomial feature
+        for other_feature in selected_features:
+            if feature != other_feature:
+                data[f'{feature}_x_{other_feature}'] = data[feature] * data[other_feature]  # Interaction feature
+
+    logger.info("Cleaning up dataset...")
+    data = data.dropna()
+
+    # Predict the next day's closing price (so we use a shift of -1)
+    data.loc[:, 'Next_Close'] = data['Close'].shift(-1)
+
+    # Drop rows with NaN in 'Next_Close' column
+    data = data.dropna(subset=['Next_Close'])
+
+    X = data.drop(columns=['Date', 'Next_Close'])
+    y = data['Next_Close']
+
+    logger.info("Splitting data into training and testing sets...")
+    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Exhausive Grid Search
+    # param_grid = {
+    #     'n_estimators': np.arange(50, 501, 50),
+    #     'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
+    #     'max_depth': np.arange(3, 16, 1),
+    #     'min_samples_split': np.arange(2, 11, 1),
+    #     'min_samples_leaf': np.arange(1, 11, 1),
+    #     'subsample': [0.5, 0.75, 1]
+    # }
+
+    # Non-Exhaustive Grid Search
+    param_grid = {
+        'n_estimators': [250],
+        'learning_rate': [0.1, 0.2],
+        'max_depth': [5, 6],
+        'min_samples_split': [4, 6],
+        'min_samples_leaf': [2, 3],
+        'subsample': [1]
+    }
+
+    # Initialize GradientBoostingRegressor
+    reg = GradientBoostingRegressor(random_state=42)
+    
+    # Initialize GridSearchCV
+    grid = GridSearchCV(estimator=reg, param_grid=param_grid, 
+                        scoring='neg_mean_squared_error', n_jobs=-1, cv=5, verbose=3)
+    
+    # Fit data to GridSearchCV
+    grid.fit(X_train, y_train)
+    
+    # Get the best parameters
+    best_params = grid.best_params_
+    logger.info(f"Best Parameters: {best_params}")
+    
+    
+    # Save the best parameters to a JSON file
+    save_best_params(best_params, ticker)
+
+    return best_params
+    
+def load_best_params(ticker):
+    file_name = f"gbr_best_params/{ticker}_best_params.json"
+    logger.info(f"Loading best parameters from {file_name}...")
+    try:
+        with open(file_name, 'r') as f:
+            best_params = json.load(f)
+        logger.info(f"Best parameters for {ticker} loaded successfully.")
+        return best_params
+    except FileNotFoundError:
+        return None
 
 def predict_next_day_closing(data, model, given_date):
     """
@@ -437,33 +585,64 @@ def outside_1_percent(predicted, actual, pct=0.01):
 def main():
     data, file_name = get_file_selection()
 
+    # Get the best parameters for the ticker
+    # GBC_Best_Parameters(data, file_name.split('.')[0])
+
+    # Load the best parameters for the ticker
+    if '_' in file_name:
+        ticker = file_name.split('_')[0]
+    else:
+        ticker = file_name.split('.')[0]
+    best_params = load_best_params(ticker)
+
+    if best_params is None:
+        logger.error("No best parameters found.")
+        logger.info("Would you like to train a new model with the best parameters (y) or use default parameters (n)?")
+        choice = c.input(f"{' ' * 33}").lower()
+
+        if choice == 'y':
+            best_params =  GBC_Best_Parameters(data, ticker)
+        else:
+            # Use the default parameters
+            best_params = {
+                'n_estimators': 250,
+                'min_samples_split': 6,
+                'min_samples_leaf': 4,
+                'max_depth': 3,
+                'learning_rate': 0.2,
+                'subsample': 1
+            }
+            logger.info("Using default parameters.")
+
+    c.print()
+
     
     data['Return'] = data['Close'].pct_change()
 
 
-    gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
+    gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0], best_params)
 
     results = compare_predictions_with_actual(modified_data, gbc_clf)
-    c.print('\n\n')
+    c.print('\n')
 
-    date = '2023-08-18'
+    # date = '2023-08-18'
 
-    # Apply feature engineering
-    with_features = apply_feature_engineering(data, file_name.split('.')[0])
+    # # Apply feature engineering
+    # with_features = apply_feature_engineering(data, file_name.split('.')[0])
 
-    X_for_date = with_features[with_features['Date'] == date].drop(columns=['Date'])
+    # X_for_date = with_features[with_features['Date'] == date].drop(columns=['Date'])
 
-    predicted_close = gbc_clf.predict(X_for_date)
+    # predicted_close = gbc_clf.predict(X_for_date)
 
-    # Increment the date by 1 day
-    date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
-    # If the date is a weekend, increment it by 1 day until it's a weekday
-    while pd.to_datetime(date).weekday() >= 5:
-        date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
+    # # Increment the date by 1 day
+    # date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
+    # # If the date is a weekend, increment it by 1 day until it's a weekday
+    # while pd.to_datetime(date).weekday() >= 5:
+    #     date = (pd.to_datetime(date) + pd.DateOffset(days=1)).strftime('%Y-%m-%d')
 
-    actual = 175.84
+    # actual = 175.84
 
-    logger.info(f"Predicted closing price for {date}: {predicted_close[0]:.2f}, actual closing price: {actual}")
+    # logger.info(f"Predicted closing price for {date}: {predicted_close[0]:.2f}, actual closing price: {actual}")
 
     # Show the r2 and mse
     logger.info(f"Mean Squared Error: {mse:.2f}")
