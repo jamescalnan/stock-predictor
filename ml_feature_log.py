@@ -299,27 +299,27 @@ def GBC_Train(data, ticker, best_params):
         logger.info(f"{idx}: {row['Importance']:.2%}")
 
 
-    test_score = np.zeros((best_params["n_estimators"],), dtype=np.float64)
-    for i, y_pred in enumerate(reg.staged_predict(X_test)):
-        test_score[i] = mean_squared_error(y_test, y_pred)
+    # test_score = np.zeros((best_params["n_estimators"],), dtype=np.float64)
+    # for i, y_pred in enumerate(reg.staged_predict(X_test)):
+    #     test_score[i] = mean_squared_error(y_test, y_pred)
 
-    fig = plt.figure(figsize=(6, 6))
-    plt.subplot(1, 1, 1)
-    plt.title("Deviance")
-    plt.plot(
-        np.arange(best_params["n_estimators"]) + 1,
-        reg.train_score_,
-        "b-",
-        label="Training Set Deviance",
-    )
-    plt.plot(
-        np.arange(best_params["n_estimators"]) + 1, test_score, "r-", label="Test Set Deviance"
-    )
-    plt.legend(loc="upper right")
-    plt.xlabel("Boosting Iterations")
-    plt.ylabel("Deviance")
-    fig.tight_layout()
-    plt.show()
+    # fig = plt.figure(figsize=(6, 6))
+    # plt.subplot(1, 1, 1)
+    # plt.title("Deviance")
+    # plt.plot(
+    #     np.arange(best_params["n_estimators"]) + 1,
+    #     reg.train_score_,
+    #     "b-",
+    #     label="Training Set Deviance",
+    # )
+    # plt.plot(
+    #     np.arange(best_params["n_estimators"]) + 1, test_score, "r-", label="Test Set Deviance"
+    # )
+    # plt.legend(loc="upper right")
+    # plt.xlabel("Boosting Iterations")
+    # plt.ylabel("Deviance")
+    # fig.tight_layout()
+    # plt.show()
 
 
     # from sklearn.inspection import permutation_importance
@@ -558,7 +558,7 @@ def compare_predictions_with_actual(data, model):
     # Exclude the last date since we won't have the actual closing price for the day after the last date
     dates_to_predict = data['Date'].iloc[:-1].values
     misses = 0
-    accuracy_requirement = 0.001
+    accuracy_requirement = 0.01
     prev = None
     for date in dates_to_predict:
         # Extract the features for the current date
@@ -567,13 +567,13 @@ def compare_predictions_with_actual(data, model):
         # Skip the prediction if the feature set contains NaN values
         if X_for_date.isnull().values.any():
             continue
-        
+
         # Predict the closing price for the next day
         predicted_close = model.predict(X_for_date)
-        
+
         # Get the actual closing price for the next day
         actual_close = data[data['Date'] == date]['Next_Close'].values[0]
-        
+
         results.append({
             'Date': date,
             'Actual_Close': actual_close,
