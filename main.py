@@ -24,5 +24,5 @@ def fetch_stock_data(symbol, target_date):
 
 
 if __name__ == '__main__':
-    target_date = "2022-08-15"  # Replace with the date you're interested in, in YYYY-MM-DD format
+    target_date = "2022-08-15" 
     fetch_stock_data('AAPL', target_date)
