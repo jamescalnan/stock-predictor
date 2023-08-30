@@ -19,6 +19,8 @@ import path
 directory = path.Path(__file__).abspath().parent
 
 
+import matplotlib.pyplot as plt
+
 
 FORMAT = "%(asctime)s — %(message)s"
 logging.basicConfig(
@@ -29,8 +31,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("rich")
-import requests
-from textblob import TextBlob
 
 c = Console()
 
@@ -270,44 +270,6 @@ def GBC_Train(data, ticker, best_params):
     logger.info("Splitting data into training and testing sets...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    
-    # param_grid = {
-    #     'n_estimators': np.arange(50, 501, 50),
-    #     'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2],
-    #     'max_depth': np.arange(3, 16, 1),
-    #     'min_samples_split': np.arange(2, 11, 1),
-    #     'min_samples_leaf': np.arange(1, 11, 1),
-    #     'subsample': [0.5, 0.75, 1]
-    # }
-
-    # clf = GradientBoostingClassifier()
-
-    # tscv = TimeSeriesSplit(n_splits=5)
-
-    # logger.info("Starting RandomizedSearchCV...")
-    # search = RandomizedSearchCV(
-    #     clf, 
-    #     param_distributions=param_dist, 
-    #     n_iter=5, 
-    #     scoring='accuracy', 
-    #     n_jobs=-1, 
-    #     cv=tscv, 
-    #     verbose=1, 
-    #     random_state=42
-    # )
-
-    # search.fit(X, y)
-
-    # best_params = search.best_params_
-
-    # best_params = {
-    #     'n_estimators': 250,
-    #     'min_samples_split': 6,
-    #     'min_samples_leaf': 4,
-    #     'max_depth': 3,
-    #     'learning_rate': 0.2,
-    #     'subsample': 1
-    # }
 
     # Train the model with the best parameters
     reg = GradientBoostingRegressor(**best_params)
@@ -323,6 +285,68 @@ def GBC_Train(data, ticker, best_params):
     
     logger.info(f"Mean Squared Error: {mse:.2f}")
     logger.info(f"R^2 Score: {r2:.2%}")
+
+    # Print the feature importances sorted in descending order
+    feature_importances = pd.DataFrame(reg.feature_importances_, index=X_train.columns, columns=['Importance'])
+    feature_importances = feature_importances.sort_values(by='Importance', ascending=False)
+    c.print('\n')
+    logger.info("Feature Importances:")
+    for idx, row in feature_importances.iterrows():
+        # Have all of the indexes be lined up
+        if len(idx) < 25:
+            idx += ' ' * (25 - len(idx))
+
+        logger.info(f"{idx}: {row['Importance']:.2%}")
+
+
+    test_score = np.zeros((best_params["n_estimators"],), dtype=np.float64)
+    for i, y_pred in enumerate(reg.staged_predict(X_test)):
+        test_score[i] = mean_squared_error(y_test, y_pred)
+
+    fig = plt.figure(figsize=(6, 6))
+    plt.subplot(1, 1, 1)
+    plt.title("Deviance")
+    plt.plot(
+        np.arange(best_params["n_estimators"]) + 1,
+        reg.train_score_,
+        "b-",
+        label="Training Set Deviance",
+    )
+    plt.plot(
+        np.arange(best_params["n_estimators"]) + 1, test_score, "r-", label="Test Set Deviance"
+    )
+    plt.legend(loc="upper right")
+    plt.xlabel("Boosting Iterations")
+    plt.ylabel("Deviance")
+    fig.tight_layout()
+    plt.show()
+
+
+    # from sklearn.inspection import permutation_importance
+
+    # feature_importance = reg.feature_importances_
+    # sorted_idx = np.argsort(feature_importance)
+    # pos = np.arange(sorted_idx.shape[0]) + 0.5
+    # fig = plt.figure(figsize=(12, 6))
+    # plt.subplot(1, 2, 1)
+    # plt.barh(pos, feature_importance[sorted_idx], align="center")
+    # plt.yticks(pos, np.array(X_train.columns)[sorted_idx])
+    # plt.title("Feature Importance (MDI)")
+
+    # result = permutation_importance(
+    #     reg, X_test, y_test, n_repeats=10, random_state=42, n_jobs=2
+    # )
+    # sorted_idx = result.importances_mean.argsort()
+    # plt.subplot(1, 2, 2)
+    # plt.boxplot(
+    #     result.importances[sorted_idx].T,
+    #     vert=False,
+    #     labels=np.array(X_train.columns)[sorted_idx],
+    # )
+    # plt.title("Permutation Importance (test set)")
+    # fig.tight_layout()
+    # plt.show()
+
 
     return reg, mse, r2, data
 
