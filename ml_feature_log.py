@@ -18,6 +18,9 @@ from rich.console import Console
 from rich.logging import RichHandler
 import logging
 
+import path
+directory = path.Path(__file__).abspath().parent
+
 
 
 FORMAT = "%(asctime)s — %(message)s"
@@ -59,7 +62,7 @@ def compute_rsi(data, window=14):
 
 def get_file_selection():
     """Returns the selected file from a menu of available CSV files."""
-    csv_files = [f for f in os.listdir() if f.endswith('.csv')]
+    csv_files = [f for f in os.listdir(f'{directory}/historical_data/') if f.endswith('.csv')]
     
     if not csv_files:
         logger.error("No suitable CSV files found in the current directory.")
@@ -70,8 +73,9 @@ def get_file_selection():
         logger.info(f"{idx}. {file}")
 
     choice = int(c.input(f"{' ' * 33}")) - 1
-    # sys.stdout.write("\033[F")
-    return csv_files[choice]
+
+    logger.info(f"Loading the dataset {csv_files[choice]}...")
+    return pd.read_csv(f'{directory}/historical_data/{csv_files[choice]}'), csv_files[choice]
 
 
 def compute_macd(data, short_window=12, long_window=26, signal_window=9):
@@ -432,19 +436,13 @@ def outside_1_percent(predicted, actual, pct=0.01):
 
 # Refactoring the main function
 def main():
-    file_name = get_file_selection()
-    if not file_name:
-        return
+    data, file_name = get_file_selection()
 
-    # os.system('cls' if os.name == 'nt' else 'clear')
-
-    logger.info(f"Loading the dataset {file_name}...")
-    data = pd.read_csv(file_name)
+    
     data['Return'] = data['Close'].pct_change()
 
 
     gbc_clf, mse, r2, modified_data = GBC_Train(data, file_name.split('.')[0])
-
 
     results = compare_predictions_with_actual(modified_data, gbc_clf)
     c.print('\n\n')
