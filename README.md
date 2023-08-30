@@ -26,7 +26,6 @@ stock-predictor/
 |-- unused_strategies/
 |   |-- (Various Python scripts for unused strategies)
 |-- LICENSE
-|-- main.py
 |-- ml_feature_log.py   <- Main running script
 |-- news_sentiment.py
 |-- README.md
@@ -59,11 +58,12 @@ This is the main script where data is processed and predictions are made. Key fu
 
 The project uses the `rich` library for enhanced logging.
 
-- Financial data is for educational purposes only and should not be considered as financial advice.
 
 ## Author
 
 James Calnan
+
+Financial data is for educational purposes only and should not be considered as financial advice.
 
 ## License
 
