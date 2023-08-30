@@ -1,9 +1,9 @@
 
-# Stock Predictor: README.md
+# Stock Predictor
 
 ## Overview
 
-The Stock Predictor project aims to predict stock prices using machine learning algorithms and sentiment analysis. It incorporates historical stock data along with news sentiment to make more accurate predictions. The project primarily uses Gradient Boosting Regressor for prediction and TextBlob for sentiment analysis.
+The Stock Predictor project aims to predict stock prices using machine learning algorithms and sentiment analysis. It incorporates historical stock data along with news sentiment to make more accurate predictions. The project primarily uses Gradient Boosting Regressor for prediction and VADER for sentiment analysis.
 
 ## Features
 
@@ -43,12 +43,6 @@ stock-predictor/
 1. Navigate to the project folder in the terminal.
 2. Run the script: `python ml_feature_log.py`
 3. Follow the on-screen instructions to proceed.
-
-## Features
-
-- Feature Engineering: Calculates various technical indicators like RSI, MACD, Bollinger Bands, etc.
-- Sentiment Analysis: Utilizes news data to generate sentiment scores.
-- Prediction: Uses Gradient Boosting Regressor to predict the next day's closing price.
 
 
 This is the main script where data is processed and predictions are made. Key functions include:
