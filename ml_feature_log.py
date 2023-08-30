@@ -362,7 +362,6 @@ def predict_next_day_closing(data, model, given_date):
     # Save the X_for_date DataFrame to a CSV file
     X_for_date.to_csv('X_for_date.csv', index=False)
 
-
     # Predict the closing price for the next day
     predicted_close = model.predict(X_for_date)
     
