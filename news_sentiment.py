@@ -143,13 +143,17 @@ def main():
 
 
 def extract_content_from_url(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-    paragraphs = soup.find_all('p')
-    content = ' '.join([p.text for p in paragraphs])
+        paragraphs = soup.find_all('p')
+        content = ' '.join([p.text for p in paragraphs])
 
-    return content
+        return content
+    except:
+        logger.error(f'Error extracting content from {url}')
+        return None
 
 
 if __name__ == '__main__':
